@@ -39,6 +39,7 @@ counter_input=0 # Количество обработанных сообщени
 key=0 # Управление выполнением дополнительных действий при определенных условиях.
 array=(0 0 0 0 0 0 0) # Отслеживание состояния работоспособности каждого объекта.
 confirm_array=(0 0 0 0 0 0 0)  # Отслеживание подтверждения работоспособности каждого объекта.
+no_signal_array=(0 0 0 0 0 0 0) #считаем что 
 name="" # Не используется?
 time_format="%d_%m_%Y_%H-%M-%S.%3N" # Формат времени.
 
@@ -56,35 +57,39 @@ while true; do
 
 	# Проверка работоспособности каждой станции.
 	for file in $(ls -tr "$inputs" 2>/dev/null); do
+		unset alive
 		IFS=',' read -r -a alive < <(openssl aes-256-cbc -pbkdf2 -d -a -pass pass:"$password" -in "$inputs/$file") # Чтение содержимого файла и распаковка его в массив alive.
-		object_name="${alive[1]}" # Получение имени объекта.
-		index=0
+		if [[ ${#alive[@]} -gt 0 ]]; then
+			object_name="${alive[1]}" # Получение имени объекта.
+			index=0
 
-		case $object_name in
-		    "Zrdn1") index=0 ;;
-		    "Zrdn2") index=1 ;;
-		    "Zrdn3") index=2 ;;
-		    "Spro")  index=3 ;;
-		    "Rls1")  index=4 ;;
-		    "Rls2")  index=5 ;;
-		    "Rls3")  index=6 ;;
-		esac
-
-		confirm_array[$index]=1 # Объект был подтвержден как функционирующий.
-		if [ "${array[$index]}" = 0 ]; then # Проверка, была ли данная станция уже зарегистрирована как функционирующая.
-		    array[$index]=1 # Отметить станцию как уже зарегистрированную.
-		    sqlite3 db/system.db "insert into Work_Journal (time, object_name, target_id, information, coordinates, speed, type)
-		        values ('${alive[0]}','$object_name','${alive[2]}','${alive[3]}','${alive[4]}','${alive[5]}','${alive[6]}');"
-		    echo "${alive[0]} $object_name ${alive[2]} ${alive[3]} ${alive[4]} ${alive[5]} ${alive[6]}"
-		    echo "${alive[0]} $object_name ${alive[2]} ${alive[3]} ${alive[4]} ${alive[5]} ${alive[6]}" >> $log_journal
+			case $object_name in
+				"Zrdn1") index=0 ;;
+				"Zrdn2") index=1 ;;
+				"Zrdn3") index=2 ;;
+				"Spro")  index=3 ;;
+				"Rls1")  index=4 ;;
+				"Rls2")  index=5 ;;
+				"Rls3")  index=6 ;;
+			esac
+			no_signal_array[$i]=0
+			echo "$object_name TESTCASE is again working arrai id: $i value ${no_signal_array[$i]}" >> $log_journal
+			confirm_array[$index]=1 # Объект был подтвержден как функционирующий.
+			if [ "${array[$index]}" = 0 ]; then # Проверка, была ли данная станция уже зарегистрирована как функционирующая.
+				array[$index]=1 # Отметить станцию как уже зарегистрированную.
+				sqlite3 db/system.db "insert into Work_Journal (time, object_name, target_id, information, coordinates, speed, type)
+					values ('${alive[0]}','$object_name','${alive[2]}','${alive[3]}','${alive[4]}','${alive[5]}','${alive[6]}');"
+				echo "${alive[0]} $object_name ${alive[2]} ${alive[3]} ${alive[4]} ${alive[5]} ${alive[6]}"
+				echo "${alive[0]} $object_name ${alive[2]} ${alive[3]} ${alive[4]} ${alive[5]} ${alive[6]}" >> $log_journal
+			fi
+			rm "$inputs/$file"
 		fi
-		rm "$inputs/$file"
 	done
 						      
 	# Проверка, все ли станции функционируют.
 	if ((key == 1)); then
 		counter_input=$((counter_input + 1))
-		if ((counter_input == 2)); then # Два раза подряд был обработан блок сообщений о работоспособности станций.
+		if ((counter_input == 5)); then # Два раза подряд был обработан блок сообщений о работоспособности станций.
 			counter_input=0
 			key=0
 			for ((i=0; i<7; i++)); do
@@ -98,12 +103,17 @@ while true; do
 			            5) not_work="Rls2" ;;
 			            6) not_work="Rls3" ;;
 			        esac
-			        array[$i]=0 # Отметка станции как неработающей.
-			        time=$(TZ=Europe/Moscow date +"$time_format")
-			        sqlite3 db/system.db "insert into Work_Journal (time, object_name, target_id, information, coordinates, speed, type)
-						values ('$time','$not_work','no signal','','','','');"
-					echo "$time $not_work no signal"
-					echo "$time $not_work no signal" >> $log_journal
+					((no_signal_array[$i]++))
+					echo "$not_work TESTCASE no signal arrai id: $i value ${no_signal_array[$i]}" >> $log_journal
+					if [[ ${no_signal_array[$i]} -eq 3 ]]; then
+						echo "$not_work TESTCASE WE ARE INSIDE no signal arrai id: $i value ${no_signal_array[$i]}" >> $log_journal
+						array[$i]=0 # Отметка станции как неработающей.
+						time=$(TZ=Europe/Moscow date +"$time_format")
+						sqlite3 db/system.db "insert into Work_Journal (time, object_name, target_id, information, coordinates, speed, type)
+							values ('$time','$not_work','no signal','','','','');"
+						echo "$time $not_work no signal"
+						echo "$time $not_work no signal" >> $log_journal
+					fi
 			    fi
 			done
 			confirm_array=(0 0 0 0 0 0 0) # Обнуление массива, чтобы в следующем цикле он снова мог отслеживать подтверждения работоспособности станций.
@@ -112,7 +122,7 @@ while true; do
 	counter=$((counter + 1))
 
 	# Каждые 30 итераций проверяем, все ли станции живы и функционируют.
-	if ((counter > 30)); then
+	if ((counter > 10)); then
 		counter=0
 		key=1
 		echo "hello" | openssl aes-256-cbc -pbkdf2 -a -salt -pass pass:$password > "RLS1/hello.log"
